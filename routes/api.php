@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BorrowRequestController;
 use App\Http\Controllers\Api\CategoryController;
@@ -21,14 +22,15 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('logout', [AuthController::class, 'logout']);
     Route::get('profile', [ProfileController::class, 'show']);
     Route::put('profile', [ProfileController::class, 'update']);
-    Route::get('borrow-requests', [BorrowRequestController::class, 'index']);
-    Route::post('borrow-requests', [BorrowRequestController::class, 'store']);
     Route::get('borrow-requests/{borrowRequest}', [BorrowRequestController::class, 'show']);
 
     Route::middleware('admin')->group(function (): void {
-        Route::apiResource('categories', CategoryController::class)->except(['index', 'show']);
-        Route::apiResource('equipment', EquipmentController::class)->except(['index', 'show']);
         Route::prefix('admin')->group(function (): void {
+            Route::get('dashboard', [AdminController::class, 'dashboard']);
+            Route::get('users', [AdminController::class, 'users']);
+            Route::get('users/{user}', [AdminController::class, 'showUser']);
+            Route::put('users/{user}', [AdminController::class, 'updateUser']);
+            Route::delete('users/{user}', [AdminController::class, 'destroyUser']);
             Route::apiResource('categories', CategoryController::class)->except(['index', 'show'])->names('admin.categories');
             Route::apiResource('equipment', EquipmentController::class)->except(['index', 'show'])->names('admin.equipment');
             Route::get('borrow-requests', [BorrowRequestController::class, 'index']);
@@ -38,5 +40,11 @@ Route::middleware('auth:sanctum')->group(function (): void {
             Route::put('transactions/{transaction}/return', [TransactionController::class, 'returnEquipment']);
             Route::get('history', [TransactionController::class, 'history']);
         });
+    });
+
+    Route::middleware('role:user')->group(function (): void {
+        Route::get('borrow-requests', [BorrowRequestController::class, 'index']);
+        Route::get('my-borrowings', [BorrowRequestController::class, 'myBorrowings']);
+        Route::post('borrow-requests', [BorrowRequestController::class, 'store']);
     });
 });
