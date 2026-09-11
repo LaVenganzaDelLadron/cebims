@@ -18,6 +18,9 @@ return new class extends Migration
             $table->text('description')->nullable();
             $table->integer('total_quantity');
             $table->integer('available_quantity');
+            $table->check('total_quantity >= 1');
+            $table->check('available_quantity >= 0');
+            $table->check('available_quantity <= total_quantity');
             $table->enum('equipment_condition', ['Excellent', 'Good', 'Fair', 'Needs Repair'])->default('Good');
             $table->string('storage_location', 150)->nullable();
             $table->string('image', 255)->nullable();

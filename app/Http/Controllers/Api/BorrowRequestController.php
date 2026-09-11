@@ -10,6 +10,7 @@ use App\Models\BorrowRequest;
 use App\Models\Equipment;
 use App\Models\ReturnLog;
 use App\Models\Transaction;
+use App\Services\AuditLogService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -53,10 +54,11 @@ class BorrowRequestController extends Controller
         return $this->response(true, 'Borrow request retrieved.', $borrowRequest->load(['user', 'items.equipment', 'transaction.returnLogs']));
     }
 
-    public function approve(UpdateBorrowStatusRequest $request, BorrowRequest $borrowRequest): JsonResponse
+    public function approve(UpdateBorrowStatusRequest $request, BorrowRequest $borrowRequest, AuditLogService $auditLog): JsonResponse
     {
-        abort_unless($borrowRequest->status === 'Pending', 422, 'Only pending requests can be approved.');
-        $transaction = DB::transaction(function () use ($borrowRequest): Transaction {
+        $transaction = DB::transaction(function () use ($borrowRequest, $auditLog): Transaction {
+            $borrowRequest = BorrowRequest::whereKey($borrowRequest->id)->lockForUpdate()->firstOrFail();
+            abort_unless($borrowRequest->status === 'Pending', 422, 'Only pending requests can be approved.');
             $borrowRequest->load('items');
             foreach ($borrowRequest->items->groupBy('equipment_id') as $items) {
                 $item = $items->first();
@@ -70,19 +72,25 @@ class BorrowRequestController extends Controller
             }
             $borrowRequest->update(['status' => 'Approved']);
 
-            return Transaction::create(['borrow_request_id' => $borrowRequest->id, 'approved_by' => auth()->id(), 'approved_at' => now()]);
+            $transaction = Transaction::create(['borrow_request_id' => $borrowRequest->id, 'approved_by' => auth()->id(), 'approved_at' => now()]);
+            $auditLog->record('admin.borrow_request.approved', $borrowRequest, ['transaction_id' => $transaction->id]);
+
+            return $transaction;
         });
 
         return $this->response(true, 'Borrow request approved.', $transaction->load('borrowRequest'));
     }
 
-    public function reject(UpdateBorrowStatusRequest $request, BorrowRequest $borrowRequest): JsonResponse
+    public function reject(UpdateBorrowStatusRequest $request, BorrowRequest $borrowRequest, AuditLogService $auditLog): JsonResponse
     {
         abort_unless($borrowRequest->status === 'Pending', 422, 'Only pending requests can be rejected.');
-        $borrowRequest->update([
-            'status' => 'Rejected',
-            'admin_notes' => $request->validated('admin_notes'),
-        ]);
+        DB::transaction(function () use ($request, $borrowRequest, $auditLog): void {
+            $borrowRequest->update([
+                'status' => 'Rejected',
+                'admin_notes' => $request->validated('admin_notes'),
+            ]);
+            $auditLog->record('admin.borrow_request.rejected', $borrowRequest, ['admin_notes' => $request->validated('admin_notes')]);
+        });
 
         return $this->response(true, 'Borrow request rejected.', $borrowRequest);
     }
@@ -97,17 +105,21 @@ class BorrowRequestController extends Controller
         return $this->response(true, 'Equipment released.', $transaction->fresh());
     }
 
-    public function processReturn(ReturnRequest $request, BorrowRequest $borrowRequest): JsonResponse
+    public function processReturn(ReturnRequest $request, BorrowRequest $borrowRequest, AuditLogService $auditLog): JsonResponse
     {
-        $transaction = $borrowRequest->transaction;
-        abort_unless($transaction && $borrowRequest->status === 'Borrowed', 422, 'Only borrowed requests can be returned.');
-        DB::transaction(function () use ($request, $borrowRequest, $transaction): void {
+        $transaction = DB::transaction(function () use ($request, $borrowRequest, $auditLog): Transaction {
+            $borrowRequest = BorrowRequest::whereKey($borrowRequest->id)->lockForUpdate()->firstOrFail();
+            $transaction = $borrowRequest->transaction()->lockForUpdate()->first();
+            abort_unless($transaction && $borrowRequest->status === 'Borrowed', 422, 'Only borrowed requests can be returned.');
             foreach (collect($request->validated('items'))->groupBy('equipment_id') as $items) {
                 $item = $items->first();
                 $returnedQuantity = $items->sum('quantity_returned');
                 $equipment = Equipment::whereKey($item['equipment_id'])->lockForUpdate()->firstOrFail();
                 $borrowed = $borrowRequest->items()->where('equipment_id', $equipment->id)->value('quantity') ?? 0;
-                if ($returnedQuantity > $borrowed) {
+                $alreadyReturned = ReturnLog::where('transaction_id', $transaction->id)
+                    ->where('equipment_id', $equipment->id)
+                    ->sum('quantity_returned');
+                if ($returnedQuantity + $alreadyReturned > $borrowed) {
                     throw ValidationException::withMessages(['items' => 'Returned quantity exceeds borrowed quantity.']);
                 }
                 if ($item['item_condition'] !== 'Lost') {
@@ -118,6 +130,12 @@ class BorrowRequestController extends Controller
             }
             $transaction->update(['returned_at' => now(), 'return_condition' => $request->validated('items.0.item_condition'), 'remarks' => $request->validated('remarks')]);
             $borrowRequest->update(['status' => 'Returned']);
+            $auditLog->record('admin.transaction.returned', $transaction, [
+                'borrow_request_id' => $borrowRequest->id,
+                'items' => $request->validated('items'),
+            ]);
+
+            return $transaction;
         });
 
         return $this->response(true, 'Equipment return recorded.', $transaction->fresh()->load('returnLogs'));

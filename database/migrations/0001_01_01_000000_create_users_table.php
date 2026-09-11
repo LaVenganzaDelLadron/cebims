@@ -21,6 +21,7 @@ return new class extends Migration
             $table->string('username', 50)->unique();
             $table->string('password', 255);
             $table->enum('role', ['admin', 'user'])->default('user');
+            $table->timestamp('disabled_at')->nullable();
             $table->rememberToken();
             $table->timestamps();
         });
