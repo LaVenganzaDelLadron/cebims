@@ -26,8 +26,14 @@ class BorrowRequestController extends Controller
         return $this->response(true, 'Borrow requests retrieved.', $query->paginate());
     }
 
+    public function myBorrowings(): JsonResponse
+    {
+        return $this->index();
+    }
+
     public function store(StoreBorrowRequestRequest $request): JsonResponse
     {
+        $this->authorize('create', BorrowRequest::class);
         $borrow = DB::transaction(function () use ($request): BorrowRequest {
             $borrow = BorrowRequest::create(array_merge($request->safe()->except('items')->toArray(), ['user_id' => $request->user()->id]));
             foreach ($request->validated('items') as $item) {
@@ -42,7 +48,7 @@ class BorrowRequestController extends Controller
 
     public function show(BorrowRequest $borrowRequest): JsonResponse
     {
-        abort_unless(auth()->user()->role === 'admin' || $borrowRequest->user_id === auth()->id(), 403);
+        $this->authorize('view', $borrowRequest);
 
         return $this->response(true, 'Borrow request retrieved.', $borrowRequest->load(['user', 'items.equipment', 'transaction.returnLogs']));
     }

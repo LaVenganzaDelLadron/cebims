@@ -10,12 +10,16 @@ class ProfileController extends Controller
 {
     public function show(): JsonResponse
     {
-        return $this->response(true, 'Profile retrieved.', auth()->user());
+        $user = auth()->user();
+        $this->authorize('view', $user);
+
+        return $this->response(true, 'Profile retrieved.', $user);
     }
 
     public function update(UpdateProfileRequest $request): JsonResponse
     {
         $user = $request->user();
+        $this->authorize('update', $user);
         $user->update($request->validated());
 
         return $this->response(true, 'Profile updated.', $user->fresh());
