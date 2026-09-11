@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\ReturnEquipmentRequest;
 use App\Models\BorrowRequest;
 use App\Models\Transaction;
+use App\Services\AuditLogService;
 use Illuminate\Http\JsonResponse;
 
 class TransactionController extends Controller
@@ -15,9 +16,9 @@ class TransactionController extends Controller
         return $this->response(true, 'Borrowed items retrieved.', BorrowRequest::with(['user', 'items.equipment', 'transaction'])->where('status', 'Borrowed')->latest()->paginate());
     }
 
-    public function returnEquipment(ReturnEquipmentRequest $request, Transaction $transaction): JsonResponse
+    public function returnEquipment(ReturnEquipmentRequest $request, Transaction $transaction, AuditLogService $auditLog): JsonResponse
     {
-        return app(BorrowRequestController::class)->processReturn($request, $transaction->borrowRequest);
+        return app(BorrowRequestController::class)->processReturn($request, $transaction->borrowRequest, $auditLog);
     }
 
     public function history(): JsonResponse
